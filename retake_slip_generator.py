@@ -10,7 +10,13 @@ import pandas as pd
 import pdfplumber
 
 CONFIG_FILE = "config.json"
-NICKNAMES_FILE = "nicknames.json"
+PREFERRED_NAMES_FILE = "preferred_names.json"
+
+DEFAULT_CONFIG = {
+    "default_pdf_dir": "",
+    "default_output_dir": "",
+    "name_format": "First + Last Initial",
+}
 
 
 # ----------------------------------------------------------------------
@@ -164,9 +170,9 @@ def extract_scoresheet_to_csv(pdf_path, output_csv_path):
 # ----------------------------------------------------------------------
 # Name Formatting & Helpers
 # ----------------------------------------------------------------------
-def format_display_name(raw_name, nicknames):
-    if raw_name in nicknames and nicknames[raw_name].strip():
-        return nicknames[raw_name].strip()
+def format_display_name(raw_name, preferred_names, name_format="First + Last Initial"):
+    if raw_name in preferred_names and preferred_names[raw_name].strip():
+        return preferred_names[raw_name].strip()
 
     parts = raw_name.split(",")
     if len(parts) == 2:
@@ -174,7 +180,14 @@ def format_display_name(raw_name, nicknames):
         first_and_middle = parts[1].strip().split()
         first_name = first_and_middle[0] if first_and_middle else ""
         last_initial = last_name[0].upper() + "." if last_name else ""
-        return f"{first_name} {last_initial}".strip()
+
+        if name_format == "First + Last":
+            return f"{first_name} {last_name}".strip()
+        elif name_format == "First Name Only":
+            return first_name
+        else:
+            # Default: First + Last Initial
+            return f"{first_name} {last_initial}".strip()
 
     return raw_name
 
@@ -191,7 +204,7 @@ def extract_chkpt_number(title):
 # ReportLab Native PDF Fallback
 # ----------------------------------------------------------------------
 def generate_native_pdf_slips(
-    student_records, chk1, chk2, period_str, chk_num, output_pdf_path, nicknames
+    student_records, chk1, chk2, period_str, chk_num, output_pdf_path, preferred_names, name_format
 ):
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import letter
@@ -238,7 +251,7 @@ def generate_native_pdf_slips(
         c.setStrokeColor(colors.gray)
         c.rect(x + 2, y + 2, box_width - 4, box_height - 4)
 
-        display_name = format_display_name(student_raw, nicknames)
+        display_name = format_display_name(student_raw, preferred_names, name_format)
         best_score_str = (
             f"{best_num:.1f}".rstrip("0").rstrip(".") + "/4"
             if valid_scores
@@ -293,10 +306,10 @@ def generate_native_pdf_slips(
 
 
 # ----------------------------------------------------------------------
-# Absolute Coordinate TikZ Slip Generator (Manual Line Spacing)
+# Absolute Coordinate TikZ Slip Generator
 # ----------------------------------------------------------------------
 def generate_latex_slips(
-    pdf_path, chk1, chk2, period, output_pdf_path, nicknames, progress_cb=None
+    pdf_path, chk1, chk2, period, output_pdf_path, preferred_names, name_format="First + Last Initial", progress_cb=None
 ):
     student_records, _, auto_period = parse_scoresheet_pdf(pdf_path)
     period_str = str(period if period else auto_period)
@@ -313,7 +326,8 @@ def generate_latex_slips(
             period_str,
             chk_num,
             output_pdf_path,
-            nicknames,
+            preferred_names,
+            name_format,
         )
         return
 
@@ -326,36 +340,28 @@ def generate_latex_slips(
         r"\usepackage{xcolor}",
         r"\pagestyle{empty}",
         r"",
-        r"% Explicit 2-line bottom text placement to manually control gap",
         r"\newcommand{\RetakeSlip}[6]{%",
         r"  \begin{tikzpicture}",
-        r"    % Card Border Box",
         r"    \draw[thick, rounded corners=2pt] (0,0) rectangle (6.3, 3.0);",
         r"",
-        r"    % Top Header Row",
         r"    \node[anchor=north west] at (0.15, 2.85) {{\textbf{\scriptsize Retake Slip}}};",
         r"    \node[anchor=north east] at (6.15, 2.85) {{\textbf{\tiny Per "
         + period_str
         + r"}}};",
         r"",
-        r"    % Checkpoint # Header",
         r"    \node[anchor=north west] at (0.15, 2.45) {{\small \textbf{Checkpoint \#"
         + chk_num
         + r"}}};",
         r"",
-        r"    % Student Display Name (Prominent & Clear)",
         r"    \node[anchor=north west] at (0.15, 2.00) {{\Large \textbf{#1}}};",
         r"",
-        r"    % Checkpoint Scores Stack",
         r"    \node[anchor=north west] at (0.15, 1.35) {{\tiny #2: \textbf{#3}}};",
         r"    \node[anchor=north west] at (0.15, 1.05) {{\tiny #4: \textbf{#5}}};",
         r"",
-        r"    % Best Score Box",
         r"    \draw[fill=gray!10, rounded corners=1pt] (4.4, 0.85) rectangle (6.15, 1.75);",
         r"    \node[anchor=center] at (5.275, 1.50) {{\tiny BEST SCORE}};",
         r"    \node[anchor=center] at (5.275, 1.15) {{\small \textbf{#6}}};",
         r"",
-        r"    % Bottom Instructions: Separated into 2 discrete lines placed 0.18cm apart",
         r"    \node[anchor=south west] at (0.15, 0.28) {{\fontsize{4.8pt}{5.0pt}\selectfont Come to tutoring for retakes, you can retake}}; ",
         r"    \node[anchor=south west] at (0.15, 0.10) {{\fontsize{4.8pt}{5.0pt}\selectfont this checkpoint on your second tutoring visit.}}; ",
         r"  \end{tikzpicture}%",
@@ -384,7 +390,7 @@ def generate_latex_slips(
         if best_num >= 4.0:
             continue
 
-        display_name = format_display_name(student_raw, nicknames)
+        display_name = format_display_name(student_raw, preferred_names, name_format)
         display_name_tex = (
             display_name.replace("&", r"\&")
             .replace("_", r"\_")
@@ -402,7 +408,6 @@ def generate_latex_slips(
         macro_call = f"\\RetakeSlip{{{display_name_tex}}}{{{label1}}}{{{s1_display}}}{{{label2}}}{{{s2_display}}}{{{best_score_str}}}"
         slips_buffer.append(macro_call)
 
-    # Build 3-column x 8-row grid
     total_slips = len(slips_buffer)
     for i in range(0, total_slips, 24):
         page_slips = slips_buffer[i : i + 24]
@@ -438,24 +443,36 @@ def generate_latex_slips(
 # ----------------------------------------------------------------------
 # GUI Dialog Windows
 # ----------------------------------------------------------------------
-class NicknameManagerDialog(tk.Toplevel):
+class PreferredNamesDialog(tk.Toplevel):
 
-    def __init__(self, parent, pdf_path, nicknames):
+    def __init__(self, parent, pdf_path, preferred_names):
         super().__init__(parent)
-        self.title("Manage Student Nicknames")
-        self.geometry("450x400")
-        self.nicknames = nicknames
+        self.title("Preferred Names")
+        self.geometry("460x420")
+        self.preferred_names = preferred_names
         self.entries = {}
 
-        # Modal window configuration
         self.transient(parent)
         self.grab_set()
 
+        header_frame = tk.Frame(self)
+        header_frame.pack(fill="x", padx=10, pady=10)
+
         tk.Label(
-            self,
-            text="Set Nicknames (Overrides Default Name):",
-            font=("Arial", 10, "bold"),
-        ).pack(pady=10)
+            header_frame,
+            text="Preferred Names",
+            font=("Arial", 11, "bold"),
+        ).pack(side="left")
+
+        info_btn = tk.Button(
+            header_frame,
+            text="❓",
+            font=("Arial", 9, "bold"),
+            relief="flat",
+            cursor="hand2",
+            command=self.show_info,
+        )
+        info_btn.pack(side="left", padx=6)
 
         container = tk.Frame(self)
         container.pack(fill="both", expand=True, padx=10, pady=5)
@@ -481,7 +498,7 @@ class NicknameManagerDialog(tk.Toplevel):
             records, _, _ = parse_scoresheet_pdf(pdf_path)
             student_list = sorted(records.keys())
         else:
-            student_list = sorted(nicknames.keys())
+            student_list = sorted(preferred_names.keys())
 
         if not student_list:
             tk.Label(
@@ -493,22 +510,29 @@ class NicknameManagerDialog(tk.Toplevel):
             row.pack(fill="x", pady=2)
             tk.Label(row, text=name, width=25, anchor="w").pack(side="left")
             entry = tk.Entry(row, width=18)
-            entry.insert(0, nicknames.get(name, ""))
+            entry.insert(0, preferred_names.get(name, ""))
             entry.pack(side="right", padx=5)
             self.entries[name] = entry
 
-        tk.Button(self, text="Save Nicknames", command=self.save).pack(pady=10)
+        tk.Button(self, text="Save Preferred Names", command=self.save).pack(pady=10)
+
+    def show_info(self):
+        messagebox.showinfo(
+            "About Preferred Names",
+            "This menu allows you to set custom display names or preferred names for individual students.\n\n"
+            "Entering a custom name here overrides the default PowerSchool display name on all generated retake slips.",
+        )
 
     def save(self):
         for name, entry in self.entries.items():
             val = entry.get().strip()
             if val:
-                self.nicknames[name] = val
-            elif name in self.nicknames:
-                del self.nicknames[name]
+                self.preferred_names[name] = val
+            elif name in self.preferred_names:
+                del self.preferred_names[name]
 
-        save_json(NICKNAMES_FILE, self.nicknames)
-        messagebox.showinfo("Saved", "Nicknames updated successfully!")
+        save_json(PREFERRED_NAMES_FILE, self.preferred_names)
+        messagebox.showinfo("Saved", "Preferred names updated successfully!")
         self.destroy()
 
 
@@ -517,11 +541,10 @@ class SettingsDialog(tk.Toplevel):
     def __init__(self, parent, config):
         super().__init__(parent)
         self.title("Settings")
-        self.geometry("500x200")
+        self.geometry("500x260")
         self.resizable(False, False)
         self.config = config
 
-        # Modal window configuration
         self.transient(parent)
         self.grab_set()
 
@@ -555,6 +578,20 @@ class SettingsDialog(tk.Toplevel):
             out_frame, text="Browse...", command=self.browse_out_dir
         ).pack(side="right", padx=(5, 0))
 
+        tk.Label(self, text="Default Student Name Format:").pack(
+            anchor="w", padx=10, pady=(10, 0)
+        )
+        self.name_fmt_var = tk.StringVar(
+            value=self.config.get("name_format", "First + Last Initial")
+        )
+        fmt_cb = ttk.Combobox(
+            self,
+            textvariable=self.name_fmt_var,
+            values=["First + Last Initial", "First + Last", "First Name Only"],
+            state="readonly",
+        )
+        fmt_cb.pack(fill="x", padx=10, pady=2)
+
         btn_frame = tk.Frame(self)
         btn_frame.pack(side="bottom", fill="x", pady=15)
         tk.Button(btn_frame, text="Save", command=self.save).pack(
@@ -581,6 +618,7 @@ class SettingsDialog(tk.Toplevel):
     def save(self):
         self.config["default_pdf_dir"] = self.pdf_dir_var.get()
         self.config["default_output_dir"] = self.out_dir_var.get()
+        self.config["name_format"] = self.name_fmt_var.get()
         save_json(CONFIG_FILE, self.config)
         messagebox.showinfo("Success", "Settings saved successfully!")
         self.destroy()
@@ -597,14 +635,11 @@ class App(tk.Tk):
         self.geometry("620x560")
         self.resizable(False, False)
 
-        self.config = load_json(
-            CONFIG_FILE, {"default_pdf_dir": "", "default_output_dir": ""}
-        )
-        self.nicknames = load_json(NICKNAMES_FILE, {})
+        self.config = load_json(CONFIG_FILE, DEFAULT_CONFIG)
+        self.preferred_names = load_json(PREFERRED_NAMES_FILE, {})
 
-        # Window instances tracking for single-instance dialogs
         self.settings_dialog = None
-        self.nicknames_dialog = None
+        self.preferred_names_dialog = None
 
         self.pdf_path_var = tk.StringVar()
         self.output_dir_var = tk.StringVar(
@@ -616,7 +651,7 @@ class App(tk.Tk):
         top_frame = tk.Frame(self)
         top_frame.pack(fill="x", padx=10, pady=5)
         tk.Button(
-            top_frame, text="✏ Nicknames", command=self.open_nicknames
+            top_frame, text="✏ Preferred Names", command=self.open_preferred_names
         ).pack(side="left")
         tk.Button(
             top_frame, text="⚙ Settings", command=self.open_settings
@@ -718,17 +753,20 @@ class App(tk.Tk):
         if not self.output_dir_var.get():
             self.output_dir_var.set(self.config.get("default_output_dir", ""))
 
-    def open_nicknames(self):
-        if self.nicknames_dialog is not None and self.nicknames_dialog.winfo_exists():
-            self.nicknames_dialog.lift()
-            self.nicknames_dialog.focus_force()
+    def open_preferred_names(self):
+        if (
+            self.preferred_names_dialog is not None
+            and self.preferred_names_dialog.winfo_exists()
+        ):
+            self.preferred_names_dialog.lift()
+            self.preferred_names_dialog.focus_force()
             return
 
-        self.nicknames_dialog = NicknameManagerDialog(
-            self, self.pdf_path_var.get(), self.nicknames
+        self.preferred_names_dialog = PreferredNamesDialog(
+            self, self.pdf_path_var.get(), self.preferred_names
         )
-        self.wait_window(self.nicknames_dialog)
-        self.nicknames_dialog = None
+        self.wait_window(self.preferred_names_dialog)
+        self.preferred_names_dialog = None
 
     def select_pdf(self):
         initial_dir = self.config.get("default_pdf_dir", "") or os.getcwd()
@@ -871,6 +909,7 @@ class App(tk.Tk):
         period = (
             None if self.period_var.get() == "Auto" else self.period_var.get()
         )
+        name_fmt = self.config.get("name_format", "First + Last Initial")
         out_pdf = os.path.join(
             out_dir,
             os.path.splitext(os.path.basename(pdf_path))[0]
@@ -880,7 +919,13 @@ class App(tk.Tk):
         def worker():
             try:
                 generate_latex_slips(
-                    pdf_path, chk1, chk2, period, out_pdf, self.nicknames
+                    pdf_path,
+                    chk1,
+                    chk2,
+                    period,
+                    out_pdf,
+                    self.preferred_names,
+                    name_fmt,
                 )
                 self.after(
                     0,

@@ -2,6 +2,7 @@
 config.json
 nicknames.json
 *.json
+*.pdf
 
 # PyInstaller build outputs
 build/
