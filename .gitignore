@@ -1,0 +1,16 @@
+# PyInstaller build outputs
+build/
+dist/
+*.spec
+
+# Local JSON user configuration & outputs
+config.json
+Output/
+*.csv
+*.tex
+*.pdf
+
+# Python & Pipenv environment artifacts
+__pycache__/
+*.pyc
+.venv/
