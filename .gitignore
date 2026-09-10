@@ -1,16 +1,20 @@
+# Runtime and user configuration JSON files
+config.json
+nicknames.json
+*.json
+
 # PyInstaller build outputs
 build/
 dist/
 *.spec
 
-# Local JSON user configuration & outputs
-config.json
+# PDF/CSV outputs and runtime working directories
 Output/
 *.csv
 *.tex
 *.pdf
 
-# Python & Pipenv environment artifacts
+# Python & Pipenv virtual environment files
 __pycache__/
 *.pyc
 .venv/
