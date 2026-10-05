@@ -678,7 +678,7 @@ class App(tk.Tk):
             anchor="w", padx=5, pady=2
         )
         self.chk_listbox = tk.Listbox(
-            chk_frame, selectmode="single", height=6, exportselection=False
+            chk_frame, selectmode="extended", height=6, exportselection=False
         )
         self.chk_listbox.pack(fill="x", padx=5, pady=2)
         self.chk_listbox.bind("<<ListboxSelect>>", self.on_checkpoint_select)
@@ -802,34 +802,32 @@ class App(tk.Tk):
 
     def on_checkpoint_select(self, event):
         selection = self.chk_listbox.curselection()
-        if not selection:
+        # Only auto-pair on a plain single click. If you ctrl-click
+        # to pick things manually, leave your selection alone.
+        if len(selection) != 1:
             return
 
         selected_index = selection[0]
         selected_title = self.assignments[selected_index]
 
-        paired_title = None
-        if "1A" in selected_title:
-            paired_title = selected_title.replace("1A", "1B")
-        elif "1B" in selected_title:
-            paired_title = selected_title.replace("1B", "1A")
-        elif "2A" in selected_title:
-            paired_title = selected_title.replace("2A", "2B")
-        elif "2B" in selected_title:
-            paired_title = selected_title.replace("2B", "2A")
-        elif "3A" in selected_title:
-            paired_title = selected_title.replace("3A", "3B")
-        elif "3B" in selected_title:
-            paired_title = selected_title.replace("3B", "3A")
-        elif "4A" in selected_title:
-            paired_title = selected_title.replace("4A", "4B")
-        elif "4B" in selected_title:
-            paired_title = selected_title.replace("4B", "4A")
+        match = re.search(r"\b(\d+)([AB])\b", selected_title, re.IGNORECASE)
+        if not match:
+            return  # something like 9C, no partner to grab
 
-        if paired_title and paired_title in self.assignments:
-            paired_idx = self.assignments.index(paired_title)
-            self.chk_listbox.selection_clear(0, tk.END)
-            self.chk_listbox.selection_set(selected_index)
+        number = match.group(1)
+        letter = match.group(2).upper()
+        partner_letter = "B" if letter == "A" else "A"
+
+        paired_idx = None
+        for idx, title in enumerate(self.assignments):
+            if idx == selected_index:
+                continue
+            m = re.search(r"\b(\d+)([AB])\b", title, re.IGNORECASE)
+            if m and m.group(1) == number and m.group(2).upper() == partner_letter:
+                paired_idx = idx
+                break
+
+        if paired_idx is not None:
             self.chk_listbox.selection_set(paired_idx)
 
     def start_loading(self, message):
